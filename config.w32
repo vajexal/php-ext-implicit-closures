@@ -1,0 +1,7 @@
+ARG_ENABLE('implicit_closures', 'implicit_closures support', 'no');
+
+if (PHP_IMPLICIT_CLOSURES != 'no') {
+	AC_DEFINE('HAVE_IMPLICIT_CLOSURES', 1, 'implicit_closures support enabled');
+
+	EXTENSION('implicit_closures', 'implicit_closures.c', null, '/DZEND_ENABLE_STATIC_TSRMLS_CACHE=1');
+}
