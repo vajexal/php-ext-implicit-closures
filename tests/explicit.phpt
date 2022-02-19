@@ -1,5 +1,5 @@
 --TEST--
-Closure with explicit use
+Explicit use
 --EXTENSIONS--
 implicit_closures
 --FILE--

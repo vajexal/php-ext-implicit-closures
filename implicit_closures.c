@@ -93,7 +93,7 @@ static void find_implicit_binds(closure_info *info, zend_ast *params_ast, zend_a
     }
 }
 
-static void process_ast(zend_ast **ast_ptr, void *context) {
+static void make_implicit_bindings(zend_ast **ast_ptr, void *context) {
     zend_ast *ast = *ast_ptr;
 
     if (ast == NULL) {
@@ -106,9 +106,9 @@ static void process_ast(zend_ast **ast_ptr, void *context) {
         zend_ast *uses_ast = decl->child[1];
         zend_ast *stmt_ast = decl->child[2];
 
-        process_ast(&stmt_ast, NULL); // go deeper to handle nested closures first
+        make_implicit_bindings(&stmt_ast, NULL); // go deeper to handle nested closures first
 
-        closure_info info; // todo pointer
+        closure_info info;
         memset(&info, 0, sizeof(closure_info));
 
         if (!uses_ast) {
@@ -132,16 +132,16 @@ static void process_ast(zend_ast **ast_ptr, void *context) {
         return;
     }
 
-    zend_ast_apply(ast, process_ast, NULL);
+    zend_ast_apply(ast, make_implicit_bindings, NULL);
 }
 
-void implicit_closures_ast_processer(zend_ast *ast) {
-    process_ast(&ast, NULL);
+void implicit_closures_ast_process(zend_ast *ast) {
+    make_implicit_bindings(&ast, NULL);
 }
 
 PHP_MINIT_FUNCTION(implicit_closures) {
     // todo call original func if present
-    zend_ast_process = implicit_closures_ast_processer;
+    zend_ast_process = implicit_closures_ast_process;
 
     return SUCCESS;
 }
