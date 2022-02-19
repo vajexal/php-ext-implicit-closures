@@ -8,6 +8,8 @@
 #include "ext/standard/info.h"
 #include "php_implicit_closures.h"
 
+void (*original_ast_process_function)(zend_ast *ast);
+
 //region copy-paste from zend_compile.c with some modifications
 typedef struct {
     HashTable uses;
@@ -137,10 +139,14 @@ static void make_implicit_bindings(zend_ast **ast_ptr, void *context) {
 
 void implicit_closures_ast_process(zend_ast *ast) {
     make_implicit_bindings(&ast, NULL);
+
+    if (original_ast_process_function) {
+        original_ast_process_function(ast);
+    }
 }
 
 PHP_MINIT_FUNCTION(implicit_closures) {
-    // todo call original func if present
+    original_ast_process_function = zend_ast_process;
     zend_ast_process = implicit_closures_ast_process;
 
     return SUCCESS;
