@@ -8,7 +8,7 @@
 #include "ext/standard/info.h"
 #include "php_implicit_closures.h"
 
-//region copy-paste from zend_compile.c
+//region copy-paste from zend_compile.c with some modifications
 typedef struct {
     HashTable uses;
     bool varvars_used;
@@ -33,7 +33,9 @@ static void find_implicit_binds_recursively(closure_info *info, zend_ast *ast) {
                 return;
             }
 
-            zend_hash_add_empty_element(&info->uses, name);
+            zval lineno;
+            ZVAL_LONG(&lineno, ast->lineno);
+            zend_hash_add(&info->uses, name, &lineno);
         } else {
             info->varvars_used = 1;
             find_implicit_binds_recursively(info, name_ast);
@@ -52,7 +54,9 @@ static void find_implicit_binds_recursively(closure_info *info, zend_ast *ast) {
             zend_ast_list *uses_list = zend_ast_get_list(uses_ast);
             uint32_t i;
             for (i = 0; i < uses_list->children; i++) {
-                zend_hash_add_empty_element(&info->uses, zend_ast_get_str(uses_list->child[i]));
+                zval lineno;
+                ZVAL_LONG(&lineno, ast->lineno);
+                zend_hash_add(&info->uses, zend_ast_get_str(uses_list->child[i]), &lineno);
             }
         }
     } else if (ast->kind == ZEND_AST_ARROW_FUNC) {
@@ -114,8 +118,10 @@ static void process_ast(zend_ast **ast_ptr, void *context) {
         find_implicit_binds(&info, params_ast, stmt_ast, uses_ast);
 
         zend_string *var_name;
-        ZEND_HASH_FOREACH_STR_KEY(&info.uses, var_name)
+        zval *lineno;
+        ZEND_HASH_FOREACH_STR_KEY_VAL(&info.uses, var_name, lineno)
             zend_ast *use_var = zend_ast_create_zval_from_str(var_name);
+            Z_LINENO(((zend_ast_zval *)use_var)->val) = Z_LVAL_P(lineno);
             uses_ast = zend_ast_list_add(uses_ast, use_var);
         ZEND_HASH_FOREACH_END();
 
