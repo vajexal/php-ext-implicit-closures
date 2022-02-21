@@ -10,9 +10,30 @@
 
 void (*original_ast_process_function)(zend_ast *ast);
 
+static zend_string *get_var_name_from_ast(zend_ast *ast) {
+    if (!ast) {
+        return NULL;
+    }
+
+    zend_ast *name_ast = ast->child[0];
+
+    if (name_ast->kind != ZEND_AST_ZVAL || Z_TYPE_P(zend_ast_get_zval(name_ast)) != IS_STRING) {
+        return NULL;
+    }
+
+    zend_string *name = zend_ast_get_str(name_ast);
+
+    if (zend_is_auto_global(name) || zend_string_equals_literal(name, "this")) {
+        return NULL;
+    }
+
+    return name;
+}
+
 //region copy-paste from zend_compile.c with some modifications
 typedef struct {
     HashTable uses;
+    HashTable locals;
     bool varvars_used;
 } closure_info;
 
@@ -21,26 +42,24 @@ static void find_implicit_binds_recursively(closure_info *info, zend_ast *ast) {
         return;
     }
 
-    if (ast->kind == ZEND_AST_VAR) {
-        zend_ast *name_ast = ast->child[0];
-        if (name_ast->kind == ZEND_AST_ZVAL && Z_TYPE_P(zend_ast_get_zval(name_ast)) == IS_STRING) {
-            zend_string *name = zend_ast_get_str(name_ast);
-            if (zend_is_auto_global(name)) {
-                /* These is no need to explicitly import auto-globals. */
-                return;
-            }
-
-            if (zend_string_equals_literal(name, "this")) {
-                /* $this does not need to be explicitly imported. */
-                return;
-            }
-
+    if ((ast->kind == ZEND_AST_ASSIGN || ast->kind == ZEND_AST_ASSIGN_REF) && ast->child[0]->kind == ZEND_AST_VAR) {
+        zend_string *name = get_var_name_from_ast(ast->child[0]);
+        if (name) {
+            zend_hash_add_empty_element(&info->locals, name);
+        }
+        find_implicit_binds_recursively(info, ast->child[1]);
+    } else if (ast->kind == ZEND_AST_VAR) {
+        zend_string *name = get_var_name_from_ast(ast);
+        if (name) {
             zval lineno;
             ZVAL_LONG(&lineno, ast->lineno);
             zend_hash_add(&info->uses, name, &lineno);
         } else {
-            info->varvars_used = 1;
-            find_implicit_binds_recursively(info, name_ast);
+            zend_ast *name_ast = ast->child[0];
+            if (name_ast->kind != ZEND_AST_ZVAL || Z_TYPE_P(zend_ast_get_zval(name_ast)) != IS_STRING) {
+                info->varvars_used = 1;
+                find_implicit_binds_recursively(info, name_ast);
+            }
         }
     } else if (zend_ast_is_list(ast)) {
         zend_ast_list *list = zend_ast_get_list(ast);
@@ -79,6 +98,7 @@ static void find_implicit_binds(closure_info *info, zend_ast *params_ast, zend_a
     zend_ast_list *use_list = zend_ast_get_list(uses_ast);
 
     zend_hash_init(&info->uses, param_list->children + use_list->children, NULL, NULL, 0);
+    zend_hash_init(&info->locals, HT_MIN_SIZE, NULL, NULL, 0);
 
     find_implicit_binds_recursively(info, stmt_ast);
 
@@ -93,6 +113,12 @@ static void find_implicit_binds(closure_info *info, zend_ast *params_ast, zend_a
         zend_ast *use_ast = use_list->child[i];
         zend_hash_del(&info->uses, zend_ast_get_str(use_ast));
     }
+
+    // remove closure's local variables
+    zend_string *var_name;
+    ZEND_HASH_FOREACH_STR_KEY(&info->locals, var_name) {
+        zend_hash_del(&info->uses, var_name);
+    } ZEND_HASH_FOREACH_END();
 }
 
 static void make_implicit_bindings(zend_ast **ast_ptr, void *context) {
@@ -121,13 +147,14 @@ static void make_implicit_bindings(zend_ast **ast_ptr, void *context) {
 
         zend_string *var_name;
         zval *lineno;
-        ZEND_HASH_FOREACH_STR_KEY_VAL(&info.uses, var_name, lineno)
+        ZEND_HASH_FOREACH_STR_KEY_VAL(&info.uses, var_name, lineno) {
             zend_ast *use_var = zend_ast_create_zval_from_str(var_name);
             Z_LINENO(((zend_ast_zval *)use_var)->val) = Z_LVAL_P(lineno);
             uses_ast = zend_ast_list_add(uses_ast, use_var);
-        ZEND_HASH_FOREACH_END();
+        } ZEND_HASH_FOREACH_END();
 
         zend_hash_destroy(&info.uses);
+        zend_hash_destroy(&info.locals);
 
         decl->child[1] = uses_ast;
 
