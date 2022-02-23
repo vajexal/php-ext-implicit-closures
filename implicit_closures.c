@@ -122,46 +122,57 @@ static void find_implicit_binds(closure_info *info, zend_ast *params_ast, zend_a
 }
 
 static void make_implicit_bindings(zend_ast **ast_ptr, void *context) {
+    zend_ast_decl *decl;
     zend_ast *ast = *ast_ptr;
 
     if (ast == NULL) {
         return;
     }
 
-    if (ast->kind == ZEND_AST_CLOSURE) {
-        zend_ast_decl *decl = (zend_ast_decl *) ast;
-        zend_ast *params_ast = decl->child[0];
-        zend_ast *uses_ast = decl->child[1];
-        zend_ast *stmt_ast = decl->child[2];
+    switch (ast->kind) {
+        case ZEND_AST_CLOSURE:
+            decl = (zend_ast_decl *) ast;
+            zend_ast *params_ast = decl->child[0];
+            zend_ast *uses_ast = decl->child[1];
+            zend_ast *stmt_ast = decl->child[2];
 
-        make_implicit_bindings(&stmt_ast, NULL); // go deeper to handle nested closures first
+            make_implicit_bindings(&stmt_ast, NULL); // go deeper to handle nested closures first
 
-        closure_info info;
-        memset(&info, 0, sizeof(closure_info));
+            closure_info info;
+            memset(&info, 0, sizeof(closure_info));
 
-        if (!uses_ast) {
-            uses_ast = zend_ast_create_list(0, ZEND_AST_CLOSURE_USES);
-        }
+            if (!uses_ast) {
+                uses_ast = zend_ast_create_list(0, ZEND_AST_CLOSURE_USES);
+            }
 
-        find_implicit_binds(&info, params_ast, stmt_ast, uses_ast);
+            find_implicit_binds(&info, params_ast, stmt_ast, uses_ast);
 
-        zend_string *var_name;
-        zval *lineno;
-        ZEND_HASH_FOREACH_STR_KEY_VAL(&info.uses, var_name, lineno) {
-            zend_ast *use_var = zend_ast_create_zval_from_str(var_name);
-            Z_LINENO(((zend_ast_zval *)use_var)->val) = Z_LVAL_P(lineno);
-            uses_ast = zend_ast_list_add(uses_ast, use_var);
-        } ZEND_HASH_FOREACH_END();
+            zend_string *var_name;
+            zval *lineno;
+            ZEND_HASH_FOREACH_STR_KEY_VAL(&info.uses, var_name, lineno) {
+                zend_ast *use_var = zend_ast_create_zval_from_str(var_name);
+                Z_LINENO(((zend_ast_zval *)use_var)->val) = Z_LVAL_P(lineno);
+                uses_ast = zend_ast_list_add(uses_ast, use_var);
+            } ZEND_HASH_FOREACH_END();
 
-        zend_hash_destroy(&info.uses);
-        zend_hash_destroy(&info.locals);
+            zend_hash_destroy(&info.uses);
+            zend_hash_destroy(&info.locals);
 
-        decl->child[1] = uses_ast;
+            decl->child[1] = uses_ast;
 
-        return;
+            break;
+        case ZEND_AST_FUNC_DECL:
+        case ZEND_AST_METHOD:
+        case ZEND_AST_CLASS:
+        case ZEND_AST_ARROW_FUNC:
+            decl = (zend_ast_decl *) ast;
+            if (decl->child[2]) {
+                zend_ast_apply(decl->child[2], make_implicit_bindings, NULL);
+            }
+            break;
+        default:
+            zend_ast_apply(ast, make_implicit_bindings, NULL);
     }
-
-    zend_ast_apply(ast, make_implicit_bindings, NULL);
 }
 
 void implicit_closures_ast_process(zend_ast *ast) {
