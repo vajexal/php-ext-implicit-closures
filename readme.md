@@ -12,6 +12,20 @@ $foo = function() {
 echo $foo(), PHP_EOL;
 ```
 
+### Limitations
+
+if local variable is created by passing by reference
+
+```php
+$foo = function () {
+    // workaround: $matches = [];
+    preg_match('/^test$/', 'test', $matches); // Undefined variable $matches
+    return $matches[0] ?? '';
+};
+
+echo $foo(), PHP_EOL;
+```
+
 ### Installation
 
 ```bash
