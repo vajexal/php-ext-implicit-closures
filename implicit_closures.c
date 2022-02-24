@@ -10,6 +10,12 @@
 
 void (*original_ast_process_function)(zend_ast *ast);
 
+typedef struct {
+    HashTable uses;
+    HashTable locals;
+    bool varvars_used;
+} closure_info;
+
 static zend_string *get_var_name_from_ast(zend_ast *ast) {
     if (!ast) {
         return NULL;
@@ -30,12 +36,22 @@ static zend_string *get_var_name_from_ast(zend_ast *ast) {
     return name;
 }
 
-//region copy-paste from zend_compile.c with some modifications
-typedef struct {
-    HashTable uses;
-    HashTable locals;
-    bool varvars_used;
-} closure_info;
+static void check_ast_for_locals(zend_ast *ast, closure_info *info) {
+    if (!ast || !info) {
+        return;
+    }
+
+    if (ast->kind != ZEND_AST_VAR) {
+        return;
+    }
+
+    zend_string *name = get_var_name_from_ast(ast);
+    if (!name) {
+        return;
+    }
+
+    zend_hash_add_empty_element(&info->locals, name);
+}
 
 static void find_implicit_binds_recursively(closure_info *info, zend_ast *ast) {
     if (!ast) {
@@ -44,23 +60,21 @@ static void find_implicit_binds_recursively(closure_info *info, zend_ast *ast) {
 
     if (ast->kind == ZEND_AST_ASSIGN || ast->kind == ZEND_AST_ASSIGN_REF) {
         if (ast->child[0]->kind == ZEND_AST_VAR) {
-            zend_string *name = get_var_name_from_ast(ast->child[0]);
-            if (name) {
-                zend_hash_add_empty_element(&info->locals, name);
-            }
+            check_ast_for_locals(ast->child[0], info);
         } else if (ast->child[0]->kind == ZEND_AST_ARRAY) {
             zend_ast_list *list = zend_ast_get_list(ast->child[0]);
             for (uint32_t i = 0; i < list->children; i++) {
                 if (list->child[i]->kind == ZEND_AST_ARRAY_ELEM) {
-                    zend_string *name = get_var_name_from_ast(list->child[i]->child[0]);
-                    if (name) {
-                        zend_hash_add_empty_element(&info->locals, name);
-                    }
+                    check_ast_for_locals(list->child[i]->child[0], info);
                 }
             }
         }
 
         find_implicit_binds_recursively(info, ast->child[1]);
+    } else if (ast->kind == ZEND_AST_CATCH) {
+        if (ast->child[1]) {
+            check_ast_for_locals(ast->child[1], info);
+        }
     } else if (ast->kind == ZEND_AST_VAR) {
         zend_string *name = get_var_name_from_ast(ast);
         if (name) {
@@ -104,7 +118,6 @@ static void find_implicit_binds_recursively(closure_info *info, zend_ast *ast) {
         }
     }
 }
-//endregion
 
 static void find_implicit_binds(closure_info *info, zend_ast *params_ast, zend_ast *stmt_ast, zend_ast *uses_ast) {
     zend_ast_list *param_list = zend_ast_get_list(params_ast);
