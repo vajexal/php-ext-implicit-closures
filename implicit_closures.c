@@ -150,7 +150,7 @@ static void make_implicit_bindings(zend_ast **ast_ptr, void *context) {
             zend_string *var_name;
             zval *lineno;
             ZEND_HASH_FOREACH_STR_KEY_VAL(&info.uses, var_name, lineno) {
-                zend_ast *use_var = zend_ast_create_zval_from_str(var_name);
+                zend_ast *use_var = zend_ast_create_zval_from_str(zend_string_dup(var_name, 0));
                 Z_LINENO(((zend_ast_zval *)use_var)->val) = Z_LVAL_P(lineno);
                 uses_ast = zend_ast_list_add(uses_ast, use_var);
             } ZEND_HASH_FOREACH_END();
