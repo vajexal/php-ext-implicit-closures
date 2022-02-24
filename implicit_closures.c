@@ -75,6 +75,11 @@ static void find_implicit_binds_recursively(closure_info *info, zend_ast *ast) {
         if (ast->child[1]) {
             check_ast_for_locals(ast->child[1], info);
         }
+    } else if (ast->kind == ZEND_AST_FOREACH) {
+        check_ast_for_locals(ast->child[1], info);
+        if (ast->child[2]) {
+            check_ast_for_locals(ast->child[2], info);
+        }
     } else if (ast->kind == ZEND_AST_VAR) {
         zend_string *name = get_var_name_from_ast(ast);
         if (name) {
