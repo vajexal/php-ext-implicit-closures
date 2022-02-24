@@ -42,11 +42,24 @@ static void find_implicit_binds_recursively(closure_info *info, zend_ast *ast) {
         return;
     }
 
-    if ((ast->kind == ZEND_AST_ASSIGN || ast->kind == ZEND_AST_ASSIGN_REF) && ast->child[0]->kind == ZEND_AST_VAR) {
-        zend_string *name = get_var_name_from_ast(ast->child[0]);
-        if (name) {
-            zend_hash_add_empty_element(&info->locals, name);
+    if (ast->kind == ZEND_AST_ASSIGN || ast->kind == ZEND_AST_ASSIGN_REF) {
+        if (ast->child[0]->kind == ZEND_AST_VAR) {
+            zend_string *name = get_var_name_from_ast(ast->child[0]);
+            if (name) {
+                zend_hash_add_empty_element(&info->locals, name);
+            }
+        } else if (ast->child[0]->kind == ZEND_AST_ARRAY) {
+            zend_ast_list *list = zend_ast_get_list(ast->child[0]);
+            for (uint32_t i = 0; i < list->children; i++) {
+                if (list->child[i]->kind == ZEND_AST_ARRAY_ELEM) {
+                    zend_string *name = get_var_name_from_ast(list->child[i]->child[0]);
+                    if (name) {
+                        zend_hash_add_empty_element(&info->locals, name);
+                    }
+                }
+            }
         }
+
         find_implicit_binds_recursively(info, ast->child[1]);
     } else if (ast->kind == ZEND_AST_VAR) {
         zend_string *name = get_var_name_from_ast(ast);
