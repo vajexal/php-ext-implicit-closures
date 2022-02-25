@@ -113,8 +113,15 @@ static void find_implicit_binds_recursively(closure_info *info, zend_ast *ast) {
             }
         }
     } else if (ast->kind == ZEND_AST_ARROW_FUNC) {
-        /* For arrow functions recursively check the expression. */
         zend_ast_decl *closure_ast = (zend_ast_decl *) ast;
+        zend_ast_list *params_list = zend_ast_get_list(closure_ast->child[0]);
+        for (uint32_t i = 0; i < params_list->children; i++) {
+            zend_string *name = zend_ast_get_str(params_list->child[i]->child[1]);
+            if (name) {
+                zend_hash_add_empty_element(&info->locals, name);
+            }
+        }
+        /* For arrow functions recursively check the expression. */
         find_implicit_binds_recursively(info, closure_ast->child[2]);
     } else if (!zend_ast_is_special(ast)) {
         uint32_t i, children = zend_ast_get_num_children(ast);
