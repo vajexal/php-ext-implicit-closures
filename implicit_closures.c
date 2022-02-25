@@ -162,7 +162,11 @@ static void find_implicit_binds(closure_info *info, zend_ast *params_ast, zend_a
     } ZEND_HASH_FOREACH_END();
 }
 
+#if PHP_VERSION_ID >= 80100
 static void make_implicit_bindings(zend_ast **ast_ptr, void *context) {
+#else
+static void make_implicit_bindings(zend_ast **ast_ptr) {
+#endif
     zend_ast_decl *decl;
     zend_ast *ast = *ast_ptr;
 
@@ -177,7 +181,12 @@ static void make_implicit_bindings(zend_ast **ast_ptr, void *context) {
             zend_ast *uses_ast = decl->child[1];
             zend_ast *stmt_ast = decl->child[2];
 
-            make_implicit_bindings(&stmt_ast, NULL); // go deeper to handle nested closures first
+            // go deeper to handle nested closures first
+#if PHP_VERSION_ID >= 80100
+            make_implicit_bindings(&stmt_ast, NULL);
+#else
+            make_implicit_bindings(&stmt_ast);
+#endif
 
             closure_info info;
             memset(&info, 0, sizeof(closure_info));
@@ -208,16 +217,28 @@ static void make_implicit_bindings(zend_ast **ast_ptr, void *context) {
         case ZEND_AST_ARROW_FUNC:
             decl = (zend_ast_decl *) ast;
             if (decl->child[2]) {
+#if PHP_VERSION_ID >= 80100
                 zend_ast_apply(decl->child[2], make_implicit_bindings, NULL);
+#else
+                zend_ast_apply(decl->child[2], make_implicit_bindings);
+#endif
             }
             break;
         default:
+#if PHP_VERSION_ID >= 80100
             zend_ast_apply(ast, make_implicit_bindings, NULL);
+#else
+            zend_ast_apply(ast, make_implicit_bindings);
+#endif
     }
 }
 
 void implicit_closures_ast_process(zend_ast *ast) {
+#if PHP_VERSION_ID >= 80100
     make_implicit_bindings(&ast, NULL);
+#else
+    make_implicit_bindings(&ast);;
+#endif
 
     if (original_ast_process_function) {
         original_ast_process_function(ast);
