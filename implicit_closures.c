@@ -67,7 +67,7 @@ static void find_implicit_binds_recursively(closure_info *info, zend_ast *ast) {
         } else if (ast->child[0]->kind == ZEND_AST_ARRAY) {
             zend_ast_list *list = zend_ast_get_list(ast->child[0]);
             for (uint32_t i = 0; i < list->children; i++) {
-                if (list->child[i]->kind == ZEND_AST_ARRAY_ELEM) {
+                if (list->child[i] && list->child[i]->kind == ZEND_AST_ARRAY_ELEM) {
                     check_ast_for_locals(list->child[i]->child[0], info);
                 }
             }
