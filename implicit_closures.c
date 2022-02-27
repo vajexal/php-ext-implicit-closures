@@ -11,9 +11,8 @@
 void (*original_ast_process_function)(zend_ast *ast);
 
 typedef struct {
-    HashTable uses;
-    HashTable locals;
-    bool varvars_used;
+    HashTable uses; // variables used by closure
+    HashTable locals; // variables created by closure
 } closure_info;
 
 static zend_string *get_var_name_from_ast(zend_ast *ast) {
@@ -58,80 +57,93 @@ static void find_implicit_binds_recursively(closure_info *info, zend_ast *ast) {
         return;
     }
 
-    if (
-        (ast->kind == ZEND_AST_ASSIGN || ast->kind == ZEND_AST_ASSIGN_REF) &&
-        (ast->child[0]->kind == ZEND_AST_VAR || ast->child[0]->kind == ZEND_AST_ARRAY)
-    ) {
-        if (ast->child[0]->kind == ZEND_AST_VAR) {
-            check_ast_for_locals(ast->child[0], info);
-        } else if (ast->child[0]->kind == ZEND_AST_ARRAY) {
-            zend_ast_list *list = zend_ast_get_list(ast->child[0]);
-            for (uint32_t i = 0; i < list->children; i++) {
-                if (list->child[i] && list->child[i]->kind == ZEND_AST_ARRAY_ELEM) {
-                    check_ast_for_locals(list->child[i]->child[0], info);
+    switch (ast->kind) {
+        case ZEND_AST_ASSIGN:
+        case ZEND_AST_ASSIGN_REF:
+            if (ast->child[0]->kind == ZEND_AST_VAR) {
+                check_ast_for_locals(ast->child[0], info);
+            } else if (ast->child[0]->kind == ZEND_AST_ARRAY) {
+                zend_ast_list *list = zend_ast_get_list(ast->child[0]);
+                for (uint32_t i = 0; i < list->children; i++) {
+                    if (list->child[i] && list->child[i]->kind == ZEND_AST_ARRAY_ELEM) {
+                        check_ast_for_locals(list->child[i]->child[0], info);
+                    }
                 }
+            } else {
+                find_implicit_binds_recursively(info, ast->child[0]);
             }
-        }
 
-        find_implicit_binds_recursively(info, ast->child[1]);
-    } else if (ast->kind == ZEND_AST_CATCH) {
-        if (ast->child[1]) {
-            check_ast_for_locals(ast->child[1], info);
-        }
-    } else if (ast->kind == ZEND_AST_FOREACH) {
-        find_implicit_binds_recursively(info, ast->child[0]);
-        check_ast_for_locals(ast->child[1], info);
-        if (ast->child[2]) {
-            check_ast_for_locals(ast->child[2], info);
-        }
-    } else if (ast->kind == ZEND_AST_VAR) {
-        zend_string *name = get_var_name_from_ast(ast);
-        if (name) {
-            zval lineno;
-            ZVAL_LONG(&lineno, ast->lineno);
-            zend_hash_add(&info->uses, name, &lineno);
-        } else {
-            zend_ast *name_ast = ast->child[0];
-            if (name_ast->kind != ZEND_AST_ZVAL || Z_TYPE_P(zend_ast_get_zval(name_ast)) != IS_STRING) {
-                info->varvars_used = 1;
-                find_implicit_binds_recursively(info, name_ast);
+            find_implicit_binds_recursively(info, ast->child[1]);
+
+            break;
+        case ZEND_AST_CATCH:
+            if (ast->child[1]) {
+                check_ast_for_locals(ast->child[1], info);
             }
-        }
-    } else if (zend_ast_is_list(ast)) {
-        zend_ast_list *list = zend_ast_get_list(ast);
-        uint32_t i;
-        for (i = 0; i < list->children; i++) {
-            find_implicit_binds_recursively(info, list->child[i]);
-        }
-    } else if (ast->kind == ZEND_AST_CLOSURE) {
-        /* For normal closures add the use() list. */
-        zend_ast_decl *closure_ast = (zend_ast_decl *) ast;
-        zend_ast *uses_ast = closure_ast->child[1];
-        if (uses_ast) {
-            zend_ast_list *uses_list = zend_ast_get_list(uses_ast);
-            uint32_t i;
-            for (i = 0; i < uses_list->children; i++) {
+
+            break;
+        case ZEND_AST_FOREACH:
+            find_implicit_binds_recursively(info, ast->child[0]);
+            check_ast_for_locals(ast->child[1], info);
+            if (ast->child[2]) {
+                check_ast_for_locals(ast->child[2], info);
+            }
+
+            break;
+        case ZEND_AST_VAR: {
+            zend_string *name = get_var_name_from_ast(ast);
+            if (name) {
                 zval lineno;
                 ZVAL_LONG(&lineno, ast->lineno);
-                zend_hash_add(&info->uses, zend_ast_get_str(uses_list->child[i]), &lineno);
+                zend_hash_add(&info->uses, name, &lineno);
+            } else {
+                zend_ast *name_ast = ast->child[0];
+                if (name_ast->kind != ZEND_AST_ZVAL || Z_TYPE_P(zend_ast_get_zval(name_ast)) != IS_STRING) {
+                    find_implicit_binds_recursively(info, name_ast);
+                }
             }
+
+            break;
         }
-    } else if (ast->kind == ZEND_AST_ARROW_FUNC) {
-        zend_ast_decl *closure_ast = (zend_ast_decl *) ast;
-        zend_ast_list *params_list = zend_ast_get_list(closure_ast->child[0]);
-        for (uint32_t i = 0; i < params_list->children; i++) {
-            zend_string *name = zend_ast_get_str(params_list->child[i]->child[1]);
-            if (name) {
-                zend_hash_add_empty_element(&info->locals, name);
+        case ZEND_AST_CLOSURE: {
+            zend_ast_decl *closure_ast = (zend_ast_decl *) ast;
+            zend_ast *uses_ast = closure_ast->child[1];
+            if (uses_ast) {
+                zend_ast_list *uses_list = zend_ast_get_list(uses_ast);
+                for (uint32_t i = 0; i < uses_list->children; i++) {
+                    zval lineno;
+                    ZVAL_LONG(&lineno, ast->lineno);
+                    zend_hash_add(&info->uses, zend_ast_get_str(uses_list->child[i]), &lineno);
+                }
             }
+
+            break;
         }
-        /* For arrow functions recursively check the expression. */
-        find_implicit_binds_recursively(info, closure_ast->child[2]);
-    } else if (!zend_ast_is_special(ast)) {
-        uint32_t i, children = zend_ast_get_num_children(ast);
-        for (i = 0; i < children; i++) {
-            find_implicit_binds_recursively(info, ast->child[i]);
+        case ZEND_AST_ARROW_FUNC: {
+            zend_ast_decl *closure_ast = (zend_ast_decl *) ast;
+            zend_ast_list *params_list = zend_ast_get_list(closure_ast->child[0]);
+            for (uint32_t i = 0; i < params_list->children; i++) {
+                zend_string *name = zend_ast_get_str(params_list->child[i]->child[1]);
+                if (name) {
+                    zend_hash_add_empty_element(&info->locals, name);
+                }
+            }
+            find_implicit_binds_recursively(info, closure_ast->child[2]);
+
+            break;
         }
+        default:
+            if (zend_ast_is_list(ast)) {
+                zend_ast_list *list = zend_ast_get_list(ast);
+                for (uint32_t i = 0; i < list->children; i++) {
+                    find_implicit_binds_recursively(info, list->child[i]);
+                }
+            } else if (!zend_ast_is_special(ast)) {
+                uint32_t children = zend_ast_get_num_children(ast);
+                for (uint32_t i = 0; i < children; i++) {
+                    find_implicit_binds_recursively(info, ast->child[i]);
+                }
+            }
     }
 }
 
@@ -190,7 +202,6 @@ static void make_implicit_bindings(zend_ast **ast_ptr) {
 #endif
 
             closure_info info;
-            memset(&info, 0, sizeof(closure_info));
 
             if (!uses_ast) {
                 uses_ast = zend_ast_create_list(0, ZEND_AST_CLOSURE_USES);
